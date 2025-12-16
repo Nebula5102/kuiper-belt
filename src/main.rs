@@ -21,6 +21,7 @@ fn main() {
         .add_plugins(AudioPlugin)
         .insert_resource(Time::<Fixed>::from_hz(60.0))
         .init_resource::<AsteroidSpawner>()
+        .init_resource::<PlayerControllers>()
         .add_event::<ResetGameEvent>()
         .add_systems(
             Startup, 
@@ -35,8 +36,8 @@ fn main() {
                 thrust,
                 fire_laser,
                 warp_drive,
-                shield_system,
-                //shield_system_controller,
+                //shield_system,
+                shield_system_controller,
             )
         )
         .add_systems(
@@ -238,6 +239,12 @@ struct AssignedController {
     gp: Option<Entity>,
 }
 
+#[derive(Resource, Default)]
+struct PlayerControllers {
+    p1: Option<Entity>,
+    p2: Option<Entity>,
+}
+
 #[derive(Component)]
 struct WarpCooldown {
     timer: Timer,
@@ -245,18 +252,17 @@ struct WarpCooldown {
 
 fn handle_connection(
     mut events: MessageReader<GamepadConnectionEvent>,
-    mut query: Query<(&Player, &mut AssignedController)>
+    mut controllers: ResMut<PlayerControllers>,
 ) {
     for event in events.read() {
         match &event.connection {
             GamepadConnection::Connected { name, vendor_id, product_id } => {
                 println!("Connected");
-                for (Player, mut assigned) in &mut query {
-                    if assigned.gp == None {
-                        assigned.gp = Some(event.gamepad);
-                        break;
-                    }
-                }
+                if controllers.p1.is_none() {
+                    controllers.p1 = Some(event.gamepad);
+                } else if controllers.p2.is_none() {
+                    controllers.p2 = Some(event.gamepad);
+                }                                
             }
             GamepadConnection::Disconnected => {
                 println!("Disconnected");
@@ -302,7 +308,6 @@ fn setup(
         WarpCooldown{
             timer: Timer::from_seconds(5.0, TimerMode::Once),
         },
-        AssignedController { gp: None },
         GameEntity,
         ShieldHealth {shp: 500.0},
     ));
@@ -323,7 +328,6 @@ fn setup(
         WarpCooldown{
             timer: Timer::from_seconds(5.0, TimerMode::Once),
         },
-        AssignedController { gp: None },
         GameEntity,
         ShieldHealth {shp: 500.0},
     ));
@@ -468,31 +472,42 @@ fn update_health_ui(
     }
 }
 
+
+fn gamepad_for_player(
+    controllers: &PlayerControllers,
+    id: PlayerId,
+) -> Option<Entity> {
+    match id {
+        PlayerId::One => controllers.p1,
+        PlayerId::Two => controllers.p2,
+    }
+}
+
 fn rotation_controller(
     time: Res<Time>,
-    gamepads: Query<(Entity, &Name, &Gamepad)>,
-    mut controller_query: Query<(&PlayerId, &Player, &mut Transform, &AssignedController)>,
+    controllers: Res<PlayerControllers>,
+    gamepads: Query<(Entity, &Gamepad)>,
+    mut query: Query<(&PlayerId, &Player, &mut Transform)>,
 ) {
-    for (id, ship, mut transform, assigned) in &mut controller_query {
+    for (id, ship, mut transform) in &mut query {
         // Skip if no gamepad assigned
+        
+        let Some(gamepad) = gamepad_for_player(&controllers, *id) else {
+            continue;
+        };
 
         let mut rotation_factor = 0.0;
-
-        for (e, id, gp) in &gamepads {
-            // Compare vendor ID to the assigned controller
-            if Some(e) == assigned.gp {
-                // Map DPad left/right to rotation
-                // You will need a helper to check button pressed:
-                // We'll assume you have a `.pressed()` method on gp like in thrust_controller
+        for (e, gp) in &gamepads {
+            if Some(e) == Some(gamepad) {
                 if gp.pressed(GamepadButton::DPadLeft) {
                     rotation_factor += 1.0;
                 }
                 if gp.pressed(GamepadButton::DPadRight) {
                     rotation_factor -= 1.0;
-                }
+                }                
             }
+                        
         }
-
         // Apply rotation
         transform.rotate_z(rotation_factor * ship.rotation_speed * time.delta_secs());
     }
@@ -532,17 +547,22 @@ fn rotation(
     }
 }
 
+
 fn thrust_controller(
     time: Res<Time>,
-    gamepads: Query<(Entity, &Name, &Gamepad)>,
-    mut controller_query: Query<(&mut Player, &PlayerId, &Transform, &AssignedController)>,
+    controllers: Res<PlayerControllers>,
+    gamepads: Query<(Entity, &Gamepad)>,
+    mut controller_query: Query<(&mut Player, &PlayerId, &Transform)>,
 ) {
-    for (mut ship, id, transform, assigned) in &mut controller_query {
+    for (mut ship, id, transform) in &mut controller_query {
         // Get assigned gamepad for this PlayerId
+        let Some(gamepad) = gamepad_for_player(&controllers, *id) else {
+            continue;
+        };
 
         let mut pressed = false;
-        for (e, id, gp) in gamepads {
-            if Some(e) == assigned.gp {
+        for (e, gp) in gamepads {
+            if Some(e) == Some(gamepad) {
                 if gp.pressed(GamepadButton::DPadUp) {
                     pressed = true;
                     break;
@@ -558,6 +578,7 @@ fn thrust_controller(
         }
     }
 }
+
 
 fn thrust(
     time: Res<Time>,
@@ -662,20 +683,24 @@ fn shield_system(
     }
 }
 
+
 fn shield_system_controller(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
-    gamepads: Query<(Entity, &Name, &Gamepad)>,
-    mut player_query: Query<(Entity, &PlayerId, &mut ShieldHealth, Option<&Children>, &AssignedController), Without<Shield>>,
+    gamepads: Query<(Entity, &Gamepad)>,
+    controllers: Res<PlayerControllers>,     
+    mut player_query: Query<(Entity, &PlayerId, &mut ShieldHealth, Option<&Children>), Without<Shield>>,
     shielded_query: Query<&ChildOf, With<Shield>>,
 ) {
-    for (entity, _id, mut shield, children, assigned) in &mut player_query {
+    for (entity, id, mut shield, children) in &mut player_query {
         let mut pressed = false;
-
+        let Some(gamepad) = gamepad_for_player(&controllers, *id) else {
+            continue;
+        };
         // Match assigned controller
-        for (e, _name, gp) in &gamepads {
-            if Some(e) == assigned.gp {
+        for (e, gp) in &gamepads {
+            if Some(e) == Some(gamepad) {
                 // NORTH = shield button
                 if gp.pressed(GamepadButton::North) {
                     pressed = true;
@@ -764,8 +789,9 @@ fn projectile_shield_collision(
 
             if (distance < player.radius + proj.radius + 20.) && shield_active {
                 // Shield absorbs but does NOT destroy projectile
+                
                 if shield.shp - 100. < 0. {
-                    shield.shp -= shield.shp % 100.;
+                    shield.shp = 0.;
                 } else {
                     shield.shp -= 100.;
                 }                
@@ -815,21 +841,25 @@ fn warp_drive(
 
 fn warp_drive_controller(
     time: Res<Time>,
-    gamepads: Query<(Entity, &Name, &Gamepad)>,
-    mut query: Query<(&Player, &mut Transform, &AssignedController, &mut WarpCooldown)>,
+    controllers: Res<PlayerControllers>,
+    gamepads: Query<(Entity, &Gamepad)>,
+    mut query: Query<(&PlayerId, &Player, &mut Transform, &mut WarpCooldown)>,
 ) {
     let warp_distance = 200.0;
 
-    for (ship, mut transform, assigned, mut cooldown) in &mut query {
+    for (id, ship, mut transform, mut cooldown) in &mut query {
         cooldown.timer.tick(time.delta());
         if !cooldown.timer.finished() {
             continue;
         }
         let mut warp_pressed = false;
+        let Some(gamepad) = gamepad_for_player(&controllers, *id) else {
+            continue;
+        };
 
         // Match controller like the other controller systems
-        for (e, _name, gp) in &gamepads {
-            if Some(e) == assigned.gp {
+        for (e, gp) in &gamepads {
+            if Some(e) == Some(gamepad) {
                 // SOUTH = warp button
                 if gp.just_pressed(GamepadButton::South) {
                     warp_pressed = true;
@@ -849,7 +879,6 @@ fn warp_drive_controller(
         }
     }
 }
-
 
 
 fn projectile_movement(
@@ -911,22 +940,28 @@ fn fire_laser(
     }
 }
 
+
+
+
 fn fire_laser_controller(
-    gamepads: Query<(Entity, &Name, &Gamepad)>,
-    query: Query<(&Transform, &Player, &PlayerId, &AssignedController)>,
+    gamepads: Query<(Entity, &Gamepad)>,
+    controllers: Res<PlayerControllers>,
+    query: Query<(&Transform, &Player, &PlayerId)>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     audio: Res<Audio>,
     sounds: Res<Sounds>,
 ) {
-    for (transform, _player, id, assigned) in &query {
+    for (transform, _player, id) in &query {
         let mut shoot = false;
 
-        // Loop over every connected controller (same pattern as rotation + thrust controller)
-        for (e, _name, gp) in &gamepads {
+        let Some(gamepad) = gamepad_for_player(&controllers, *id) else {
+            continue;
+        };        // Loop over every connected controller (same pattern as rotation + thrust controller)
+        for (e, gp) in &gamepads {
             // Compare controller to assigned controller
-            if Some(e) == assigned.gp {
+            if Some(e) == Some(gamepad) {
                 // West button = Fire
                 if gp.just_pressed(GamepadButton::West) {
                     shoot = true;
