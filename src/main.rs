@@ -8,6 +8,7 @@ use bevy::{
     window::WindowResized,
 };
 use rand::Rng;
+use rand::rng;
 use bevy::input::gamepad::*;
 use bevy_kira_audio::{Audio, AudioControl, AudioPlugin, AudioSource};
 const RES_WIDTH: u32 = 1200;
@@ -36,8 +37,8 @@ fn main() {
                 thrust,
                 fire_laser,
                 warp_drive,
-                //shield_system,
-                shield_system_controller,
+                shield_system,
+                //shield_system_controller,
             )
         )
         .add_systems(
@@ -62,7 +63,7 @@ fn main() {
                 ship_asteroid_collision,
                 reset_key_system,
                 reset_game_system,
-                
+                ship_nickel_collision,
             )
         )
         .run();
@@ -155,6 +156,11 @@ fn reset_game_system(
 
     // Recreate initial state
     setup(commands, asset_server,meshes,materials); 
+}
+
+#[derive(Component)]
+struct Nickel {
+    radius: f32,
 }
 
 
@@ -1259,8 +1265,55 @@ fn projectile_asteroid_collision(
                             },
                         ));
                     }
+                } else {
+                        let angle = rng().gen_range(0.0..std::f32::consts::TAU);
+
+                        // child velocity
+                        let speed = rng().gen_range(10.0..60.0);
+                        let mesh = meshes.add(Circle::new(7.0).mesh());
+                        let material = materials.add(Color::srgb(0.2, 0.8, 0.8));
+                        commands.spawn((
+                                Mesh2d(mesh),
+                                MeshMaterial2d(material),
+                                Transform::from_translation(
+                                    asteroid_transform.translation,
+                                ),
+                            Nickel {
+                                radius: 7.0,
+                            },
+                        ));
                 }
                 break; // stop checking after hit
+            }
+        }
+    }
+}
+
+fn ship_nickel_collision(
+    mut commands: Commands,
+    mut players: Query<(Entity, &Transform, &mut ShieldHealth, &Player)>,
+    asteroids: Query<(Entity, &Transform, &Nickel), Without<Player>>,
+) {
+
+    for (player_entity, player_transform, mut shp, player ) in players.iter_mut() {
+        let player_pos = player_transform.translation.truncate();
+        let player_radius = player.radius;
+
+        for (nickel_entity, nickel_transform, nickel) in asteroids.iter() {
+            let nickel_pos = nickel_transform.translation.truncate();
+            let nickel_radius = nickel.radius;
+
+            let distance = player_pos.distance(nickel_pos);
+
+            if distance < player_radius + nickel_radius {
+                // Damage player
+                shp.shp += 100.0;
+
+                // Destroy asteroid
+                commands.entity(nickel_entity).despawn();
+
+                // Optional: break so one asteroid only hits once
+                break;
             }
         }
     }

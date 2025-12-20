@@ -5,7 +5,7 @@ My first attempt at a game, Kuiper Belt is a 1v1 space shooter based off of the 
 - [ ] Menu Screen
 - [ ] Round Counter
 - [ ] Tournament Mode
-- [ ] Replenish Shield Points
+- [X] Replenish Shield Points
 - [ ] Winning Screen
 - [X] Working restart game feature with controllers
 - [ ] Viewport that changes with proximity of players
