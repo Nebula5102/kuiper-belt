@@ -412,6 +412,7 @@ fn update_shield_ui(
                             red: false,
                             blue: true,
                         },
+                        GameEntity,
                     ));
                     break;
                 }
@@ -431,6 +432,7 @@ fn update_shield_ui(
                             red: true,
                             blue: false,
                         },
+                        GameEntity,
                     ));
                     break;
                 }
@@ -1263,6 +1265,7 @@ fn projectile_asteroid_collision(
                                 radius: new_radius,
                                 velocity,
                             },
+                            GameEntity,
                         ));
                     }
                 } else {
@@ -1281,6 +1284,7 @@ fn projectile_asteroid_collision(
                             Nickel {
                                 radius: 7.0,
                             },
+                            GameEntity,
                         ));
                 }
                 break; // stop checking after hit
